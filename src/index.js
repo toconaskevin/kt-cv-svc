@@ -58,15 +58,26 @@ app.get("/cv", async (_req, res) => {
       Key: key,
     });
     const data = await s3.send(command);
-    res.setHeader("Content-Type", data.ContentType || "application/pdf");
-    if (data.Body) {
-      data.Body.pipe(res);
-    } else {
+    if (!data.Body) {
       res.status(500).json({ error: "No data in object body" });
+      return;
     }
+
+    // Buffer the object: SDK v3 Body is not always a classic Node stream; piping to Express can
+    // truncate or yield an empty body in some runtimes, which browsers show as a blank PDF.
+    const bytes = await data.Body.transformToByteArray();
+    const buf = Buffer.from(bytes);
+    const ct = data.ContentType || "application/pdf";
+
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader("Content-Disposition", 'inline; filename="cv.pdf"');
+    res.end(buf);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch CV from object store" });
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to fetch CV from object store" });
+    }
   }
 });
 
